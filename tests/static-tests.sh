@@ -9,12 +9,14 @@ for file in \
   "$ROOT/doctor.sh" \
   "$ROOT/uninstall-homelab.sh" \
   "$ROOT/scripts/install-vps.sh" \
+  "$ROOT/scripts/bootstrap-key.sh" \
   "$ROOT/scripts/uninstall-vps.sh"; do
   bash -n "$file"
 done
 
 "$ROOT/setup.sh" --help >/dev/null
 "$ROOT/install-client.sh" --help >/dev/null
+"$ROOT/scripts/bootstrap-key.sh" --help >/dev/null
 if "$ROOT/setup.sh" --vps-host 'bad host' --vps-user test >/dev/null 2>&1; then
   echo "Invalid VPS hostname was unexpectedly accepted" >&2
   exit 1

@@ -52,16 +52,25 @@ If TCP 22 is unavailable and VPS port 443 is free:
 
 If the VPS uses a cloud firewall or security group, allow the selected public SSH port there.
 
+The first run generates a dedicated setup key and asks for the VPS login password once. Subsequent setup runs are passwordless; `sudo` may still prompt on the VPS.
+
 ## Connect from the laptop
 
-Copy the generated `client-ssh-config` and this installer to the laptop, then run:
+No configuration file needs to be copied. Clone the repository on the laptop and generate the matching SSH configuration locally:
 
 ```bash
-./install-client.sh --config ./client-ssh-config
+git clone https://github.com/zx3xyy/homelab-reverse-ssh.git
+cd homelab-reverse-ssh
+
+./install-client.sh \
+  --vps-host VPS_IP_OR_DOMAIN \
+  --vps-user VPS_USER \
+  --homelab-user HOMELAB_USER
+
 ssh homelab
 ```
 
-The laptop must already have key-based access to `VPS_USER@VPS_IP_OR_DOMAIN`.
+The installer generates `~/.ssh/homelab_client_ed25519` and copies it to both the VPS and Home Lab. Enter each machine's current password once; future `ssh homelab` connections are passwordless. Use `--skip-key-copy` if keys are managed separately.
 
 ## Operations
 
