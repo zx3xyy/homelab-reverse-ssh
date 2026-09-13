@@ -102,7 +102,7 @@ awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
   !skip {print}
 ' "$TARGET" > "$CLEAN_CONFIG"
 
-for host_alias in "$VPS_ALIAS" "$CLIENT_ALIAS"; do
+for host_alias in "$VPS_ALIAS" "$VPS_HOST" "$CLIENT_ALIAS"; do
   if awk -v host="$host_alias" '
     /^[[:space:]]*Host[[:space:]]+/ {
       for (i=2; i<=NF; i++) if ($i == host) found=1
@@ -126,11 +126,18 @@ Host $VPS_ALIAS
     ServerAliveInterval 30
     ServerAliveCountMax 3
 
+# Eternal Terminal resolves ProxyJump aliases before invoking OpenSSH. Match
+# that resolved host so its implicit jump process uses the key without prompts.
+Host $VPS_HOST
+    IdentityFile $IDENTITY
+    IdentitiesOnly yes
+    BatchMode yes
+
 Host $CLIENT_ALIAS
     HostName localhost
     User $HOMELAB_USER
     Port $REMOTE_PORT
-    ProxyJump $VPS_ALIAS
+    ProxyJump $VPS_USER@$VPS_ALIAS:$PUBLIC_PORT
     IdentityFile $IDENTITY
     IdentitiesOnly yes
     ServerAliveInterval 30

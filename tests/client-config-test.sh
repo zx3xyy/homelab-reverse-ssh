@@ -19,8 +19,19 @@ HOME="$TMP_DIR" "$ROOT/install-client.sh" \
   --target "$TMP_DIR/.ssh/config" >/dev/null
 
 grep -q '^# BEGIN homelab-reverse-ssh$' "$TMP_DIR/.ssh/config"
+grep -q '^Host test-vps$' "$TMP_DIR/.ssh/config"
+grep -q '^Host 203\.0\.113\.10$' "$TMP_DIR/.ssh/config"
 grep -q '^Host test-homelab$' "$TMP_DIR/.ssh/config"
+grep -q '^    ProxyJump relay@test-vps:443$' "$TMP_DIR/.ssh/config"
 test "$(grep -c '^# BEGIN homelab-reverse-ssh$' "$TMP_DIR/.ssh/config")" -eq 1
+
+# ET resolves the jump alias to its HostName. OpenSSH must retain the same
+# identity and noninteractive mode when ET invokes the resolved name directly.
+RESOLVED_VPS_CONFIG="$(ssh -G -F "$TMP_DIR/.ssh/config" relay@203.0.113.10 2>/dev/null)"
+grep -q '^user relay$' <<< "$RESOLVED_VPS_CONFIG"
+grep -q "^identityfile $TMP_DIR/.ssh/homelab_client_ed25519$" <<< "$RESOLVED_VPS_CONFIG"
+grep -q '^identitiesonly yes$' <<< "$RESOLVED_VPS_CONFIG"
+grep -q '^batchmode yes$' <<< "$RESOLVED_VPS_CONFIG"
 
 HOME="$TMP_DIR" "$ROOT/install-client.sh" \
   --vps-host 203.0.113.10 \
