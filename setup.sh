@@ -15,6 +15,10 @@ CLIENT_ALIAS="homelab"
 VPS_ALIAS="homelab-vps"
 IDENTITY_PATH=""
 ADMIN_IDENTITY_PATH=""
+WITH_ET=1
+ET_PUBLIC_PORT=2022
+ET_REMOTE_PORT=22023
+ET_LOCAL_PORT=2022
 
 usage() {
   cat <<'EOF'
@@ -33,6 +37,9 @@ Options:
   --admin-identity PATH  Home Lab key for VPS setup (default: ~/.ssh/homelab_vps_admin_ed25519)
   --alias NAME           Client Home Lab alias (default: homelab)
   --vps-alias NAME       Client VPS alias (default: homelab-vps)
+  --et-public-port PORT  Public ET jump-server port (default: 2022)
+  --et-remote-port PORT  VPS loopback ET reverse port (default: 22023)
+  --without-et           Skip Eternal Terminal setup (enabled by default)
   -h, --help             Show this help
 EOF
 }
@@ -58,6 +65,9 @@ while (($#)); do
     --admin-identity) ADMIN_IDENTITY_PATH="${2:-}"; shift 2 ;;
     --alias) CLIENT_ALIAS="${2:-}"; shift 2 ;;
     --vps-alias) VPS_ALIAS="${2:-}"; shift 2 ;;
+    --et-public-port) ET_PUBLIC_PORT="${2:-}"; shift 2 ;;
+    --et-remote-port) ET_REMOTE_PORT="${2:-}"; shift 2 ;;
+    --without-et) WITH_ET=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1" ;;
   esac
@@ -76,12 +86,22 @@ valid_name "$TUNNEL_USER" || die "Invalid --tunnel-user: $TUNNEL_USER"
 valid_name "$HOMELAB_USER" || die "Invalid --homelab-user: $HOMELAB_USER"
 valid_alias "$CLIENT_ALIAS" || die "Invalid --alias: $CLIENT_ALIAS"
 valid_alias "$VPS_ALIAS" || die "Invalid --vps-alias: $VPS_ALIAS"
+if ((WITH_ET)); then
+  valid_port "$ET_PUBLIC_PORT" || die "Invalid --et-public-port: $ET_PUBLIC_PORT"
+  valid_port "$ET_REMOTE_PORT" || die "Invalid --et-remote-port: $ET_REMOTE_PORT"
+  [[ "$ET_PUBLIC_PORT" != "$PUBLIC_PORT" ]] || die "ET and SSH public ports must differ"
+  [[ "$ET_PUBLIC_PORT" != "$REMOTE_PORT" ]] || die "ET public port conflicts with the SSH reverse port"
+  [[ "$ET_REMOTE_PORT" != "$PUBLIC_PORT" ]] || die "ET reverse port conflicts with the SSH public port"
+  [[ "$ET_REMOTE_PORT" != "$REMOTE_PORT" ]] || die "ET and SSH reverse ports must differ"
+  [[ "$ET_REMOTE_PORT" != "$ET_PUBLIC_PORT" ]] || die "ET public and reverse ports must differ"
+fi
 
 for cmd in ssh scp ssh-keygen sudo base64 getent; do
   command -v "$cmd" >/dev/null || die "Missing command: $cmd"
 done
 [[ -f "$SCRIPT_DIR/scripts/install-vps.sh" ]] || die "Missing scripts/install-vps.sh"
 [[ -x "$SCRIPT_DIR/scripts/bootstrap-key.sh" ]] || die "Missing scripts/bootstrap-key.sh"
+[[ -x "$SCRIPT_DIR/scripts/install-et-server.sh" ]] || die "Missing scripts/install-et-server.sh"
 
 USER_HOME="$(getent passwd "$HOMELAB_USER" | cut -d: -f6)"
 [[ -n "$USER_HOME" && -d "$USER_HOME" ]] || die "Home directory not found for $HOMELAB_USER"
@@ -126,9 +146,13 @@ chmod 644 "$IDENTITY_PATH.pub"
 
 PUBKEY_B64="$(base64 < "$IDENTITY_PATH.pub" | tr -d '\n')"
 REMOTE_INSTALLER="/tmp/homelab-reverse-ssh-install-vps.$$"
+REMOTE_ET_INSTALLER="/tmp/homelab-reverse-ssh-install-et.$$"
 
 log "Installing the restricted relay configuration on the VPS"
 "${SCP_ADMIN[@]}" "$SCRIPT_DIR/scripts/install-vps.sh" "$VPS_USER@$VPS_HOST:$REMOTE_INSTALLER"
+if ((WITH_ET)); then
+  "${SCP_ADMIN[@]}" "$SCRIPT_DIR/scripts/install-et-server.sh" "$VPS_USER@$VPS_HOST:$REMOTE_ET_INSTALLER"
+fi
 REMOTE_ARGS=(
   "$REMOTE_INSTALLER"
   --tunnel-user "$TUNNEL_USER"
@@ -136,8 +160,16 @@ REMOTE_ARGS=(
   --remote-port "$REMOTE_PORT"
   --public-key-b64 "$PUBKEY_B64"
 )
+if ((WITH_ET)); then
+  REMOTE_ARGS+=(
+    --with-et
+    --et-public-port "$ET_PUBLIC_PORT"
+    --et-remote-port "$ET_REMOTE_PORT"
+    --et-installer "$REMOTE_ET_INSTALLER"
+  )
+fi
 printf -v REMOTE_CMD '%q ' "${REMOTE_ARGS[@]}"
-"${SSH_ADMIN[@]}" -t "$VPS_TARGET" "sudo bash $REMOTE_CMD; rc=\$?; rm -f $(printf '%q' "$REMOTE_INSTALLER"); exit \$rc"
+"${SSH_ADMIN[@]}" -t "$VPS_TARGET" "sudo bash $REMOTE_CMD; rc=\$?; rm -f $(printf '%q' "$REMOTE_INSTALLER") $(printf '%q' "$REMOTE_ET_INSTALLER"); exit \$rc"
 
 log "Pinning the VPS host key for port $PUBLIC_PORT"
 TMP_DIR="$(mktemp -d)"
@@ -212,9 +244,76 @@ if ((TUNNEL_READY == 0)); then
   die "Tunnel did not open VPS localhost:$REMOTE_PORT"
 fi
 
+if ((WITH_ET)); then
+  log "Installing Eternal Terminal on the Home Lab"
+  sudo "$SCRIPT_DIR/scripts/install-et-server.sh" --bind-ip 127.0.0.1 --port "$ET_LOCAL_PORT"
+
+  ET_TUNNEL_UNIT_PATH="/etc/systemd/system/homelab-reverse-ssh-et-tunnel.service"
+  ET_TUNNEL_UNIT_TMP="$TMP_DIR/homelab-reverse-ssh-et-tunnel.service"
+  cat > "$ET_TUNNEL_UNIT_TMP" <<EOF
+[Unit]
+Description=Persistent Eternal Terminal reverse tunnel
+Documentation=https://github.com/MisterTea/EternalTerminal
+Wants=network-online.target
+After=network-online.target homelab-reverse-ssh-etserver.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=$HOMELAB_USER
+Environment=AUTOSSH_GATETIME=0
+ExecStart=$AUTOSSH_BIN -M 0 -N -T -p $PUBLIC_PORT -i $IDENTITY_PATH -o BatchMode=yes -o IdentitiesOnly=yes -o UserKnownHostsFile=$LOCAL_CONFIG_DIR/known_hosts -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=10 -o ExitOnForwardFailure=yes -R localhost:$ET_REMOTE_PORT:localhost:$ET_LOCAL_PORT $TUNNEL_USER@$VPS_HOST
+Restart=always
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo install -m 644 "$ET_TUNNEL_UNIT_TMP" "$ET_TUNNEL_UNIT_PATH"
+  sudo systemctl daemon-reload
+  sudo systemctl enable homelab-reverse-ssh-et-tunnel
+  sudo systemctl restart homelab-reverse-ssh-et-tunnel
+
+  ET_TUNNEL_READY=0
+  for _ in {1..10}; do
+    if "${SSH_ADMIN[@]}" "$VPS_TARGET" "ss -H -ltn 'sport = :$ET_REMOTE_PORT' | grep -q ."; then
+      ET_TUNNEL_READY=1
+      break
+    fi
+    sleep 1
+  done
+  if ((ET_TUNNEL_READY == 0)); then
+    sudo systemctl status --no-pager homelab-reverse-ssh-et-tunnel || true
+    die "ET tunnel did not open VPS localhost:$ET_REMOTE_PORT"
+  fi
+fi
+
 log "Setup complete"
 printf 'Tunnel: %s@%s:%s -> VPS localhost:%s\n' "$TUNNEL_USER" "$VPS_HOST" "$PUBLIC_PORT" "$REMOTE_PORT"
 printf '\nOn the laptop, clone this repository and run:\n'
-printf '  ./install-client.sh --vps-host %q --vps-user %q --homelab-user %q --public-port %q --remote-port %q --alias %q --vps-alias %q\n' \
-  "$VPS_HOST" "$VPS_USER" "$HOMELAB_USER" "$PUBLIC_PORT" "$REMOTE_PORT" "$CLIENT_ALIAS" "$VPS_ALIAS"
+CLIENT_INSTALL_ARGS=(
+  ./install-client.sh
+  --vps-host "$VPS_HOST"
+  --vps-user "$VPS_USER"
+  --homelab-user "$HOMELAB_USER"
+  --public-port "$PUBLIC_PORT"
+  --remote-port "$REMOTE_PORT"
+  --alias "$CLIENT_ALIAS"
+  --vps-alias "$VPS_ALIAS"
+)
+if ((WITH_ET)); then
+  CLIENT_INSTALL_ARGS+=(--et-public-port "$ET_PUBLIC_PORT" --et-remote-port "$ET_REMOTE_PORT")
+else
+  CLIENT_INSTALL_ARGS+=(--without-et)
+fi
+printf '  '
+printf '%q ' "${CLIENT_INSTALL_ARGS[@]}"
+printf '\n'
 printf '  ssh %s\n' "$CLIENT_ALIAS"
+if ((WITH_ET)); then
+  printf '  %s-et\n' "$CLIENT_ALIAS"
+fi

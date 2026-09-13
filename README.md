@@ -3,16 +3,17 @@
 [![CI](https://github.com/zx3xyy/homelab-reverse-ssh/actions/workflows/ci.yml/badge.svg)](https://github.com/zx3xyy/homelab-reverse-ssh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Reach a NATed Home Lab through a public VPS using only OpenSSH.
+Reach a NATed Home Lab through a public VPS with reconnecting SSH and Eternal Terminal sessions.
 
 ```text
 Laptop -- SSH / ProxyJump --> VPS <-- persistent reverse SSH -- Home Lab
 ```
 
-- No router port forwarding, public home IP, VPN, or laptop-side agent
+- No router port forwarding, public home IP, or VPN
 - Automatic startup and reconnection with systemd and autossh
+- Eternal Terminal sessions survive laptop sleep and TCP disconnects
 - Dedicated tunnel key and least-privilege VPS account
-- Reverse port bound to VPS loopback only
+- Home Lab ports remain bound to VPS loopback only
 
 > Use this only where access to personal infrastructure is permitted. Port 443 support is not intended to bypass organizational policy.
 
@@ -20,7 +21,7 @@ Laptop -- SSH / ProxyJump --> VPS <-- persistent reverse SSH -- Home Lab
 
 - VPS and Home Lab: Ubuntu 20.04+ or Debian 11+
 - An existing sudo-capable VPS SSH account
-- Laptop: OpenSSH with access to that VPS account
+- Laptop: macOS, OpenSSH, and Homebrew (Homebrew is only needed for Eternal Terminal)
 
 ## Setup
 
@@ -39,7 +40,10 @@ This configures both machines and creates:
 
 ```text
 VPS 127.0.0.1:22022 -> Home Lab localhost:22
+VPS 127.0.0.1:22023 -> Home Lab Eternal Terminal
 ```
+
+It also installs an Eternal Terminal jump server on VPS TCP `2022`. Allow that port in the VPS cloud firewall or security group. Use `--without-et` to keep an SSH-only installation.
 
 If TCP 22 is unavailable and VPS port 443 is free:
 
@@ -68,9 +72,12 @@ cd homelab-reverse-ssh
   --homelab-user HOMELAB_USER
 
 ssh homelab
+homelab-et
 ```
 
 The installer generates `~/.ssh/homelab_client_ed25519` and copies it to both the VPS and Home Lab. Enter each machine's current password once; future `ssh homelab` connections are passwordless. Use `--skip-key-copy` if keys are managed separately.
+
+`homelab-et` reconnects the same terminal after laptop sleep or a temporary network loss. Keep `ssh homelab` for file transfer, VS Code Remote SSH, and recovery. To opt out, pass `--without-et` to both installers.
 
 ## Operations
 
@@ -89,13 +96,14 @@ sudo ./uninstall-homelab.sh
 sudo ./scripts/uninstall-vps.sh
 ```
 
-Re-run `setup.sh` with the same arguments to update the installation. It is idempotent and preserves the tunnel key.
+Re-run both installers with the same arguments to update an existing installation. Updates preserve existing keys, unmanaged SSH configuration, and the original `ssh homelab` path; Eternal Terminal is added as a separate service and command.
 
 For recovery after a physical power outage, enable **Power On After AC Loss** (or the equivalent option) in the Home Lab BIOS/UEFI.
 
 ## Security
 
 - The VPS reverse port listens only on `localhost`.
+- The Home Lab Eternal Terminal server listens only on `localhost`; its VPS endpoint is reached through a separate restricted reverse tunnel.
 - The tunnel user cannot open a TTY, forward an agent, use X11, or create local forwards.
 - `PermitListen` restricts it to the configured reverse port.
 - Host keys are pinned before the persistent service starts.

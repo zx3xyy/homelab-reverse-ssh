@@ -11,6 +11,10 @@ VPS_ALIAS="homelab-vps"
 TARGET="${HOME}/.ssh/config"
 IDENTITY="${HOME}/.ssh/homelab_client_ed25519"
 COPY_KEYS=1
+WITH_ET=1
+ET_PUBLIC_PORT=2022
+ET_REMOTE_PORT=22023
+ET_ALIAS=""
 BEGIN_MARKER="# BEGIN homelab-reverse-ssh"
 END_MARKER="# END homelab-reverse-ssh"
 
@@ -33,6 +37,10 @@ Options:
   --identity PATH      Client key (default: ~/.ssh/homelab_client_ed25519)
   --target PATH        SSH config path (default: ~/.ssh/config)
   --skip-key-copy      Configure SSH without generating or installing a key
+  --et-public-port PORT  Public ET jump-server port (default: 2022)
+  --et-remote-port PORT  VPS loopback ET reverse port (default: 22023)
+  --et-alias NAME        ET command name (default: ALIAS-et)
+  --without-et           Skip Eternal Terminal setup (enabled by default)
 EOF
 }
 
@@ -48,6 +56,10 @@ while (($#)); do
     --identity) IDENTITY="${2:-}"; shift 2 ;;
     --target) TARGET="${2:-}"; shift 2 ;;
     --skip-key-copy) COPY_KEYS=0; shift ;;
+    --et-public-port) ET_PUBLIC_PORT="${2:-}"; shift 2 ;;
+    --et-remote-port) ET_REMOTE_PORT="${2:-}"; shift 2 ;;
+    --et-alias) ET_ALIAS="${2:-}"; shift 2 ;;
+    --without-et) WITH_ET=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1" ;;
   esac
@@ -60,6 +72,14 @@ valid_port "$PUBLIC_PORT" || die "Invalid --public-port"
 valid_port "$REMOTE_PORT" || die "Invalid --remote-port"
 valid_alias "$CLIENT_ALIAS" || die "Invalid --alias"
 valid_alias "$VPS_ALIAS" || die "Invalid --vps-alias"
+ET_ALIAS="${ET_ALIAS:-$CLIENT_ALIAS-et}"
+if ((WITH_ET)); then
+  valid_port "$ET_PUBLIC_PORT" || die "Invalid --et-public-port"
+  valid_port "$ET_REMOTE_PORT" || die "Invalid --et-remote-port"
+  valid_alias "$ET_ALIAS" || die "Invalid --et-alias"
+  [[ "$ET_PUBLIC_PORT" != "$PUBLIC_PORT" ]] || die "ET and SSH public ports must differ"
+  [[ "$ET_REMOTE_PORT" != "$REMOTE_PORT" ]] || die "ET and SSH reverse ports must differ"
+fi
 [[ "$IDENTITY" = /* && ! "$IDENTITY" =~ [[:space:]] ]] || die "--identity must be an absolute path without whitespace"
 [[ "$TARGET" = /* ]] || die "--target must be an absolute path"
 for cmd in ssh ssh-keygen base64; do
@@ -158,3 +178,33 @@ if ((COPY_KEYS)); then
 fi
 
 printf '\nInstalled. Future connections are passwordless: ssh %s\n' "$CLIENT_ALIAS"
+
+if ((WITH_ET)); then
+  [[ "$(uname -s)" == "Darwin" ]] || die "SSH remains installed; automatic ET client setup requires macOS (or re-run with --without-et)"
+  if ! command -v et >/dev/null 2>&1; then
+    command -v brew >/dev/null 2>&1 || die "SSH remains installed; install Homebrew or re-run with --without-et"
+    printf '\nInstalling Eternal Terminal with Homebrew...\n'
+    brew install et
+  fi
+  command -v et >/dev/null 2>&1 || die "SSH remains installed, but the ET client was not found after installation"
+
+  ET_BIN="$(command -v et)"
+  WRAPPER_DIR="$(dirname "$ET_BIN")"
+  if [[ ! -w "$WRAPPER_DIR" ]]; then
+    WRAPPER_DIR="$HOME/.local/bin"
+    mkdir -p "$WRAPPER_DIR"
+    printf 'Note: %s is not on PATH; invoke the ET wrapper by its full path.\n' "$WRAPPER_DIR"
+  fi
+  ET_WRAPPER="$WRAPPER_DIR/$ET_ALIAS"
+  if [[ -e "$ET_WRAPPER" ]] && ! grep -q '^# Managed by homelab-reverse-ssh$' "$ET_WRAPPER" 2>/dev/null; then
+    die "SSH and ET remain installed, but $ET_WRAPPER already exists and was not overwritten"
+  fi
+  ET_WRAPPER_TMP="$TMP_DIR/$ET_ALIAS"
+  cat > "$ET_WRAPPER_TMP" <<EOF
+#!/usr/bin/env bash
+# Managed by homelab-reverse-ssh
+exec "$ET_BIN" "$CLIENT_ALIAS:$ET_REMOTE_PORT" --jport "$ET_PUBLIC_PORT" "\$@"
+EOF
+  install -m 755 "$ET_WRAPPER_TMP" "$ET_WRAPPER"
+  printf 'Persistent terminal installed: %s\n' "$ET_WRAPPER"
+fi
