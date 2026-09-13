@@ -193,7 +193,10 @@ if ((WITH_ET)); then
   if [[ ! -w "$WRAPPER_DIR" ]]; then
     WRAPPER_DIR="$HOME/.local/bin"
     mkdir -p "$WRAPPER_DIR"
-    printf 'Note: %s is not on PATH; invoke the ET wrapper by its full path.\n' "$WRAPPER_DIR"
+    case ":$PATH:" in
+      *":$WRAPPER_DIR:"*) ;;
+      *) printf 'Note: add %s to PATH, or invoke the ET wrapper by its full path.\n' "$WRAPPER_DIR" ;;
+    esac
   fi
   ET_WRAPPER="$WRAPPER_DIR/$ET_ALIAS"
   if [[ -e "$ET_WRAPPER" ]] && ! grep -q '^# Managed by homelab-reverse-ssh$' "$ET_WRAPPER" 2>/dev/null; then
@@ -203,7 +206,12 @@ if ((WITH_ET)); then
   cat > "$ET_WRAPPER_TMP" <<EOF
 #!/usr/bin/env bash
 # Managed by homelab-reverse-ssh
-exec "$ET_BIN" "$CLIENT_ALIAS:$ET_REMOTE_PORT" --jport "$ET_PUBLIC_PORT" "\$@"
+exec "$ET_BIN" "$CLIENT_ALIAS:$ET_REMOTE_PORT" \
+  --jport "$ET_PUBLIC_PORT" \
+  --ssh-option "IdentityFile=$IDENTITY" \
+  --ssh-option "IdentitiesOnly=yes" \
+  --ssh-option "BatchMode=yes" \
+  "\$@"
 EOF
   install -m 755 "$ET_WRAPPER_TMP" "$ET_WRAPPER"
   printf 'Persistent terminal installed: %s\n' "$ET_WRAPPER"
