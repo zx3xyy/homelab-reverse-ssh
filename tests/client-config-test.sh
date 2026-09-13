@@ -61,16 +61,16 @@ HOME="$TMP_DIR" PATH="$FAKE_BIN:$PATH" "$ROOT/install-client.sh" \
 test -x "$FAKE_BIN/test-homelab-et"
 grep -q '^# Managed by homelab-reverse-ssh$' "$FAKE_BIN/test-homelab-et"
 ET_TEST_LOG="$TMP_DIR/et-args" "$FAKE_BIN/test-homelab-et" --verbose
-sed -n '1p' "$TMP_DIR/et-args" | grep -qx 'test-homelab:22023'
-sed -n '2p' "$TMP_DIR/et-args" | grep -qx -- '--jport'
-sed -n '3p' "$TMP_DIR/et-args" | grep -qx '2022'
-sed -n '4p' "$TMP_DIR/et-args" | grep -qx -- '--ssh-option'
-sed -n '5p' "$TMP_DIR/et-args" | grep -qx "IdentityFile=$TMP_DIR/.ssh/homelab_client_ed25519"
-sed -n '6p' "$TMP_DIR/et-args" | grep -qx -- '--ssh-option'
-sed -n '7p' "$TMP_DIR/et-args" | grep -qx 'IdentitiesOnly=yes'
-sed -n '8p' "$TMP_DIR/et-args" | grep -qx -- '--ssh-option'
-sed -n '9p' "$TMP_DIR/et-args" | grep -qx 'BatchMode=yes'
-sed -n '10p' "$TMP_DIR/et-args" | grep -qx -- '--verbose'
+sed -n '1p' "$TMP_DIR/et-args" | grep -qx -- '--jport'
+sed -n '2p' "$TMP_DIR/et-args" | grep -qx '2022'
+sed -n '3p' "$TMP_DIR/et-args" | grep -qx -- '--ssh-option'
+sed -n '4p' "$TMP_DIR/et-args" | grep -qx "IdentityFile=$TMP_DIR/.ssh/homelab_client_ed25519"
+sed -n '5p' "$TMP_DIR/et-args" | grep -qx -- '--ssh-option'
+sed -n '6p' "$TMP_DIR/et-args" | grep -qx 'IdentitiesOnly=yes'
+sed -n '7p' "$TMP_DIR/et-args" | grep -qx -- '--ssh-option'
+sed -n '8p' "$TMP_DIR/et-args" | grep -qx 'BatchMode=yes'
+sed -n '9p' "$TMP_DIR/et-args" | grep -qx -- '--verbose'
+sed -n '10p' "$TMP_DIR/et-args" | grep -qx 'test-homelab:22023'
 grep -q '^Host existing$' "$TMP_DIR/.ssh/config"
 test "$(grep -c '^# BEGIN homelab-reverse-ssh$' "$TMP_DIR/.ssh/config")" -eq 1
 

@@ -206,12 +206,13 @@ if ((WITH_ET)); then
   cat > "$ET_WRAPPER_TMP" <<EOF
 #!/usr/bin/env bash
 # Managed by homelab-reverse-ssh
-exec "$ET_BIN" "$CLIENT_ALIAS:$ET_REMOTE_PORT" \
+exec "$ET_BIN" \
   --jport "$ET_PUBLIC_PORT" \
   --ssh-option "IdentityFile=$IDENTITY" \
   --ssh-option "IdentitiesOnly=yes" \
   --ssh-option "BatchMode=yes" \
-  "\$@"
+  "\$@" \
+  "$CLIENT_ALIAS:$ET_REMOTE_PORT"
 EOF
   install -m 755 "$ET_WRAPPER_TMP" "$ET_WRAPPER"
   printf 'Persistent terminal installed: %s\n' "$ET_WRAPPER"
